@@ -13,6 +13,7 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4, landscape
 import re
+import holidays
 
 MESES = {
     1: "JANEIRO",
@@ -45,180 +46,196 @@ def definir_escala(horas):
 
     return "Horista"
 
+def obter_feriados_mes(mes, ano):
+
+    br = holidays.country_holidays(
+        "BR",
+        years=[ano]
+    )
+
+    lista = []
+
+    for data, nome in br.items():
+
+        if data.month == mes:
+
+            lista.append(
+                f"{data.strftime('%d/%m')} - {nome}"
+            )
+
+    return sorted(lista)
+
 
 def extrair_funcionarios(pdf):
 
-    texto = ""
-
     reader = PdfReader(pdf)
 
+    texto = ""
+
     for pagina in reader.pages:
-        texto += (pagina.extract_text() or "") + " "
+        texto += (pagina.extract_text() or "") + "\n"
+    fim = texto.find("Total de empregados:")
+
+    if fim > 0:
+        texto = texto[:fim]
 
     codigo = "0000"
 
-    
-    m = re.search(r"\((\d{4})\)", texto)
+    m = re.search(r"\((\d{3,4})\)", texto)
 
     if m:
-        codigo = m.group(1)
+        codigo = m.group(1).zfill(4)
     else:
 
         nome_arquivo = Path(pdf).stem
 
-        m2 = re.search(r"(\d{4})", nome_arquivo)
+        m2 = re.search(r"(\d{3,4})", nome_arquivo)
 
         if m2:
-            codigo = m2.group(1)
+            codigo = m2.group(1).zfill(4)
 
-
-    nome_condominio = texto.split("Página:")[0].strip()
+    if "Página:" in texto:
+        nome_condominio = texto.split("Página:")[0].strip()
+    else:
+        nome_condominio = texto
 
     funcionarios = []
 
-    padrao = re.compile(
-        r"(\d+)\s+(.+?)Mensalista\s+(\d+,\d+)",
-        re.IGNORECASE
-    )
+    linhas = texto.split("\n")
 
-    for registro in padrao.finditer(texto):
+    cargos = [
 
-        print("=" * 50)
-        print(registro.group(2))
+        "ENCARREGADO DE MANUTENÇÃO PREDIAL",
+        "AUX DE MANUTENÇÃO PREDIAL",
+
+        "ENCARREGADO DE MANUTENÇÃO",
+        "ENCARREGADO DE MANUTENÇAO",
+
+        "AUXILIAR DE SERVIÇOS GERAIS",
+        "AUXILIAR DE SERVIÇO GERAIS",
+
+        "AUXILIAR DE MANUTENÇÃO",
+        "AUXILIAR ADMINISTRATIVO",
+
+        "ASSISTENTE ADMINISTRATIVO",
+
+        "PORTEIRO NOTURNO",
+        "PORTEIRO CHEFE",
+        "PORTEIRO DIURNO",
+        "PORTEIRO",
+
+        "VIGIA NOTURNO",
+        "VIGIA",
+
+        "AUX DE PORTARIA",
+
+        "FAXINEIRO",
+        "SERVENTE",
+        "FOLGUISTA",
+        "CONCIERGE",
+
+        "GARAGISTA",
+
+        "GERENTE DE CONTROLE",
+
+        "ENCARREGADO(A) DE LIMPEZA",
+
+        "JARDINEIRO (A)",
+
+        "ZELADOR"
+    ]
+
+    for bloco in linhas:
+
+        registro = re.search(
+            r"(\d+)\s+(.*?)\s+Mensalista\s+(\d+,\d+)",
+            bloco,
+            re.IGNORECASE
+        )
+
+        if not registro:
+            continue
 
         cod = registro.group(1)
-        bloco = registro.group(2).strip()
+
+        nome_cargo = registro.group(2)
+
         horas = registro.group(3)
-        
-        for cargo_fix in [
 
-            "PORTEIRO NOTURNO",
-            "PORTEIRO CHEFE",
-            "PORTEIRO DIURNO",
-            "PORTEIRO",
+        bloco = nome_cargo
 
-            "VIGIA NOTURNO",
-            "VIGIA",
 
-            "ZELADOR",
-            "FAXINEIRO",
-            "SERVENTE",
-            "FOLGUISTA",
-            "CONCIERGE",
+        cargo_encontrado = None
 
-            "AUX DE PORTARIA",
-            "AUXILIAR DE MANUTENÇÃO",
-            "AUXILIAR DE SERVIÇO GERAIS",
-            "AUXILIAR DE SERVIÇOS GERAIS",
+        for cargo in sorted(
+            cargos,
+            key=len,
+            reverse=True
+        ):
 
-            "ASSISTENTE ADMINISTRATIVO",
-
-            "ENCARREGADO DE MANUTENÇÃO",
-            "ENCARREGADO DE MANUTENÇAO",
-            "ENCARREGADO(A) DE LIMPEZA",
-
-            "GARAGISTA",
-            "GERENTE DE CONTROLE",
-            "JARDINEIRO (A)"
-
-        ]:
-
-            bloco = re.sub(
-                rf"([A-ZÀ-Ú])({re.escape(cargo_fix)})",
-                r"\1 \2",
-                bloco,
-                flags=re.IGNORECASE
+            pos = bloco.upper().find(
+                cargo.upper()
             )
 
-        partes = bloco.split()
+            if pos >= 0:
 
-        if len(partes) < 2:
-            continue
+                nome = bloco[:pos].strip()
 
-        cargo_encontrado = ""
+                if nome.startswith(cod):
+                    nome = nome[len(cod):].strip()
+                    
+                nome = re.sub(r"^\d+\s*", "", nome)
 
-        palavras_cargo = [
-            "PORTEIRO",
-            "NOTURNO",         
-            "DIURNO",
-            "GERENTE",
-            "CONTROLE",
-            "GARAGISTA",
-            "SERVIÇOS",
-            "SERVIÇO",
-            "GERAIS",
-            "JARDINEIRO",
-            "LIMPEZA",
-            "CHEFE",
-            "VIGIA",
-            "ZELADOR",
-            "FAXINEIRO",
-            "SERVENTE",
-            "FOLGUISTA",
-            "AUX",
-            "AUXILIAR",
-            "ENCARREGADO",
-            "ASSISTENTE",
-            "ADMINISTRATIVO",
-            "MANUTENÇÃO",
-            "MANUTENÇAO",
-            "PORTARIA",
-	        "CONCIERGE",
-            "PREDIAL"
-        ]
+                funcionarios.append({
 
-        posicao_cargo = None
+                    "codigo": int(cod),
 
-        for i, palavra in enumerate(partes):
+                    "nome": nome.title(),
 
-            if palavra.upper() in palavras_cargo:
+                    "cargo": cargo.title(),
 
-                posicao_cargo = i
+                    "escala": definir_escala(horas)
+
+                })
+
+                cargo_encontrado = cargo
+
                 break
 
-        if posicao_cargo is None:
+        if cargo_encontrado is None:
             continue
-
-        nome = " ".join(partes[:posicao_cargo])
-
-        cargo = " ".join(partes[posicao_cargo:])
-
-        funcionarios.append({
-            "codigo": int(cod),
-            "nome": nome.title(),
-            "cargo": cargo.title(),
-            "escala": definir_escala(horas)
-        })
-        
-        print("ADICIONADO:")
-        print(nome)
-        print("TOTAL ATUAL:", len(funcionarios))
-
 
     funcionarios.sort(
         key=lambda x: x["codigo"]
     )
-    
-    if len(funcionarios) == 0:
 
-        print("SEM FUNCIONARIOS:")
-        print(pdf)
-    
-        print("ANTES DO RETURN:")
-        print("CONDOMINIO:", codigo)
-        print("FUNCIONARIOS:", len(funcionarios))
-    
-    	
-    return codigo, nome_condominio, funcionarios
+    vistos = set()
+
+    lista_final = []
+
+    for func in funcionarios:
+
+        chave = (
+            func["codigo"],
+            func["nome"]
+        )
+
+        if chave not in vistos:
+
+            vistos.add(chave)
+
+            lista_final.append(func)
+
+    return (
+        codigo,
+        nome_condominio,
+        lista_final
+    )
 
 def gerar_pdf(pdf, pasta_saida):
 
     codigo, nome_condominio, funcionarios = extrair_funcionarios(pdf)
 
-    
-    print("RECEBIDO NA GERACAO:")
-    print(codigo)
-    print("TOTAL:", len(funcionarios))
 
 
     if len(funcionarios) == 0:
@@ -228,6 +245,16 @@ def gerar_pdf(pdf, pasta_saida):
         f"{MESES[datetime.now().month]}/"
         f"{datetime.now().year}"
     )
+    mes_atual = datetime.now().month
+    ano_atual = datetime.now().year
+
+    feriados_mes = obter_feriados_mes(
+        mes_atual,
+        ano_atual
+    )  
+
+
+
 
     arquivo_saida = (
         Path(pasta_saida)
@@ -293,8 +320,6 @@ def gerar_pdf(pdf, pasta_saida):
         "Observações"
     ]]
     
-    print("CONDOMINIO:", codigo)
-    print("TOTAL FUNCIONARIOS:", len(funcionarios))
 
 
     for f in funcionarios:
@@ -345,6 +370,7 @@ def gerar_pdf(pdf, pasta_saida):
 
     elementos.append(Spacer(1, 20))
 
+
     assinaturas = Table(
         [
             [
@@ -362,6 +388,29 @@ def gerar_pdf(pdf, pasta_saida):
     elementos.append(assinaturas)
 
     elementos.append(Spacer(1, 10))
+
+    elementos.append(Spacer(1, 10))
+
+
+    elementos.append(
+        Paragraph(
+            "<b>FERIADOS DO MÊS</b>",
+            estilos["Normal"]
+        )
+    )
+
+    for feriado in feriados_mes:
+
+        elementos.append(
+            Paragraph(
+                feriado,
+                estilos["Normal"]
+            )
+        )
+
+    elementos.append(Spacer(1, 10))
+
+
 
     elementos.append(
         Paragraph(
@@ -405,7 +454,6 @@ if pasta_cadastros:
 
     arquivos = list(Path(pasta_cadastros).glob("*.pdf"))
 
-    print(f"PDFs encontrados: {len(arquivos)}")
 
     for pdf in arquivos:
 
